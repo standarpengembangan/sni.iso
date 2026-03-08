@@ -2,7 +2,67 @@ import streamlit as st
 import os
 import re
 import time
+import glob
+import atexit
+import threading
 from io import BytesIO
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTO-CLEANUP — pembersihan file temporer otomatis
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Pola file temporer yang dibuat oleh aplikasi
+_TEMP_PATTERNS = ["temp_main_*", "opt_*", "cover_*", "di_*", "pp_*", "ip_*", "ID_*"]
+# Hapus file lebih lama dari N menit
+_MAX_AGE_MINUTES = 30
+
+def _cleanup_temp_files(max_age_minutes: int = _MAX_AGE_MINUTES, silent: bool = True):
+    """Hapus semua file temporer yang lebih lama dari max_age_minutes."""
+    deleted, freed = 0, 0
+    cutoff = time.time() - (max_age_minutes * 60)
+    for pattern in _TEMP_PATTERNS:
+        for fpath in glob.glob(pattern):
+            try:
+                if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                    size = os.path.getsize(fpath)
+                    os.remove(fpath)
+                    deleted += 1
+                    freed += size
+            except Exception:
+                pass
+    if not silent and deleted > 0:
+        mb = freed / (1024 * 1024)
+        print(f"[AutoCleanup] {deleted} file dihapus, {mb:.2f} MB dibebaskan.")
+    return deleted, freed
+
+def _cleanup_session_files(session_state):
+    """Hapus file milik sesi saat ini segera."""
+    keys = ['_target_file', '_final_opt_file', '_final_tr_file']
+    for k in keys:
+        fpath = session_state.get(k)
+        if fpath and os.path.isfile(fpath):
+            try:
+                os.remove(fpath)
+            except Exception:
+                pass
+
+def _start_background_cleanup():
+    """Jalankan cleanup berkala di background thread (tiap 15 menit)."""
+    def _loop():
+        while True:
+            time.sleep(15 * 60)
+            _cleanup_temp_files(silent=False)
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
+
+# Jalankan background cleanup sekali saat modul pertama kali diload
+if 'bg_cleanup_started' not in st.session_state:
+    _cleanup_temp_files(silent=True)   # bersihkan sisa sesi sebelumnya
+    _start_background_cleanup()
+    st.session_state['bg_cleanup_started'] = True
+
+# Daftarkan cleanup saat proses Python berhenti (atexit)
+atexit.register(_cleanup_temp_files, max_age_minutes=0, silent=False)
 
 # --- IMPORT ENGINE ---
 from engine2 import DocxOptimizerEngine
@@ -501,6 +561,33 @@ LANG_OPTIONS = {
 }
 
 # --- HELPER FUNGSI ---
+def _parse_doc_structure(docx_path: str) -> list:
+    """Parsing dokumen menjadi daftar section: [{heading, level, paragraphs}]"""
+    try:
+        from docx import Document as _Doc
+        doc = _Doc(docx_path)
+        sections, current = [], {"heading": "Pembukaan", "level": 0, "paragraphs": []}
+        for para in doc.paragraphs:
+            txt = para.text.strip()
+            if not txt:
+                continue
+            style = para.style.name.lower()
+            if style.startswith("heading"):
+                if current["paragraphs"]:
+                    sections.append(current)
+                try:
+                    lvl = int(style.replace("heading", "").strip())
+                except Exception:
+                    lvl = 1
+                current = {"heading": txt, "level": lvl, "paragraphs": []}
+            else:
+                current["paragraphs"].append(txt)
+        if current["paragraphs"] or current["heading"] != "Pembukaan":
+            sections.append(current)
+        return sections
+    except Exception:
+        return []
+
 def get_elapsed_str(start_time: float) -> str:
     elapsed = time.time() - start_time
     if elapsed < 60:
@@ -734,6 +821,8 @@ if st.session_state.get('_run_process') and st.session_state.get('_target_file')
             st.session_state['_final_tr_file'] = tr_out
             st.session_state['_final_time'] = get_elapsed_str(start_time)
             st.session_state['_show_results'] = True
+            # Parse dokumen langsung agar chat langsung siap setelah rerun
+            st.session_state['_doc_sections'] = _parse_doc_structure(tr_out)
         else:
             raise Exception("Terjemahan gagal.")
 
@@ -788,42 +877,16 @@ if st.session_state.get('_show_results'):
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     if st.button("🔄 Proses File Baru", key="reset", use_container_width=True):
+        # Hapus file sesi ini segera sebelum reset
+        _cleanup_session_files(st.session_state)
         for k in ['_show_results', '_final_opt_file', '_final_tr_file', '_final_time', '_run_process',
-                  '_doc_text', '_chat_history']:
+                  '_doc_text', '_chat_history', '_doc_sections', '_target_file']:
             if k in st.session_state: del st.session_state[k]
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MESIN ANALISIS LOKAL — 100% offline, tidak ada data keluar
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _parse_doc_structure(docx_path: str) -> list:
-    """Parsing dokumen menjadi daftar section: [{heading, level, body, paragraphs}]"""
-    try:
-        from docx import Document as _Doc
-        doc = _Doc(docx_path)
-        sections, current = [], {"heading": "Pembukaan", "level": 0, "paragraphs": []}
-        for para in doc.paragraphs:
-            txt = para.text.strip()
-            if not txt:
-                continue
-            style = para.style.name.lower()
-            if style.startswith("heading"):
-                if current["paragraphs"]:
-                    sections.append(current)
-                try:
-                    lvl = int(style.replace("heading", "").strip())
-                except Exception:
-                    lvl = 1
-                current = {"heading": txt, "level": lvl, "paragraphs": []}
-            else:
-                current["paragraphs"].append(txt)
-        if current["paragraphs"] or current["heading"] != "Pembukaan":
-            sections.append(current)
-        return sections
-    except Exception:
-        return []
-
 
 def _local_answer(query: str, sections: list, history: list) -> str:
     """Mesin jawab lokal berbasis pencarian dan ekstraksi dari struktur dokumen."""
@@ -1033,13 +1096,15 @@ def _claude_chat(system: str, messages: list) -> str:
 
 # ── TAMPILAN CHAT — selalu tampil di dashboard ────────────────────────────────
 
-# Parse dokumen jika sudah ada hasil
-if '_doc_sections' not in st.session_state:
-    _src = st.session_state.get('_final_opt_file') or st.session_state.get('_final_tr_file')
-    if _src and os.path.exists(_src):
-        st.session_state['_doc_sections'] = _parse_doc_structure(_src)
-    else:
-        st.session_state['_doc_sections'] = []
+# Parse dokumen — selalu refresh jika ada file hasil tapi sections masih kosong
+_src = st.session_state.get('_final_tr_file') or st.session_state.get('_final_opt_file')
+_cached_sections = st.session_state.get('_doc_sections', [])
+
+if _src and os.path.exists(_src) and len(_cached_sections) == 0:
+    # Ada file baru tapi belum diparsing — parse sekarang
+    st.session_state['_doc_sections'] = _parse_doc_structure(_src)
+elif '_doc_sections' not in st.session_state:
+    st.session_state['_doc_sections'] = []
 
 sections = st.session_state.get('_doc_sections', [])
 n_sec    = len(sections)
@@ -1115,54 +1180,192 @@ with st.expander(_exp_label, expanded=True):
         unsafe_allow_html=True
     )
 
-    # TTS engine (inject sekali)
+    # ── Pemilih Suara TTS ────────────────────────────────────────────────────
     _components.html("""
-    <script>
-    window._tts_speak = function(text) {
-        if (!('speechSynthesis' in window)) return;
-        window.speechSynthesis.cancel();
-        var utt = new SpeechSynthesisUtterance(text);
-        utt.lang = 'id-ID'; utt.rate = 0.95; utt.pitch = 1.0;
-        var v = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('id'));
-        if (v) utt.voice = v;
-        window.speechSynthesis.speak(utt);
+<div id="tts-voice-bar" style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+  <span style="color:rgba(165,180,252,0.7);font-size:0.73rem;font-family:sans-serif;">🎙️ Suara:</span>
+  <select id="tts-voice-select"
+    style="background:rgba(15,23,42,0.85);border:1.5px solid rgba(99,102,241,0.35);
+           color:#c7d2fe;font-size:0.73rem;padding:3px 8px;border-radius:8px;
+           font-family:sans-serif;cursor:pointer;outline:none;max-width:260px;">
+    <option value="">⏳ Memuat daftar suara...</option>
+  </select>
+  <select id="tts-rate-select"
+    style="background:rgba(15,23,42,0.85);border:1.5px solid rgba(99,102,241,0.35);
+           color:#c7d2fe;font-size:0.73rem;padding:3px 8px;border-radius:8px;
+           font-family:sans-serif;cursor:pointer;outline:none;">
+    <option value="0.7">🐢 Lambat</option>
+    <option value="0.92" selected>▶️ Normal</option>
+    <option value="1.2">⚡ Cepat</option>
+    <option value="1.5">🚀 Sangat Cepat</option>
+  </select>
+</div>
+<script>
+(function(){
+  var sel = document.getElementById('tts-voice-select');
+
+  function populateVoices(){
+    var voices = window.speechSynthesis.getVoices();
+    if(!voices.length) return;
+    sel.innerHTML = '';
+
+    var id_voices = voices.filter(function(v){
+      return v.lang.startsWith('id') || v.lang.startsWith('ms');
+    });
+    var en_voices = voices.filter(function(v){
+      return v.lang.startsWith('en');
+    }).slice(0, 10);
+
+    if(id_voices.length){
+      var og = document.createElement('optgroup');
+      og.label = '🇮🇩 Indonesia / Melayu';
+      id_voices.forEach(function(v){
+        var o = document.createElement('option');
+        o.value = v.name;
+        o.textContent = v.name + ' (' + v.lang + ')';
+        og.appendChild(o);
+      });
+      sel.appendChild(og);
+    }
+
+    if(en_voices.length){
+      var og2 = document.createElement('optgroup');
+      og2.label = '🌐 English (fallback)';
+      en_voices.forEach(function(v){
+        var o = document.createElement('option');
+        o.value = v.name;
+        o.textContent = v.name + ' (' + v.lang + ')';
+        og2.appendChild(o);
+      });
+      sel.appendChild(og2);
+    }
+
+    sel.onchange = function(){
+      try{ localStorage.setItem('tts_voice', sel.value); }catch(e){}
     };
-    window._tts_stop = function() { window.speechSynthesis.cancel(); };
-    </script>
-    """, height=0)
+    try{
+      var saved = localStorage.getItem('tts_voice');
+      if(saved && sel.querySelector('option[value="'+saved+'"]')) sel.value = saved;
+    }catch(e){}
+  }
+
+  if(window.speechSynthesis.getVoices().length > 0){
+    populateVoices();
+  } else {
+    window.speechSynthesis.onvoiceschanged = populateVoices;
+    setTimeout(function(){ populateVoices(); }, 500);
+  }
+})();
+</script>
+""", height=52)
+
+    # TTS helper — teks disimpan di hidden element, bukan inline onclick
+    def _tts_html(text: str, btn_id: str) -> str:
+        import base64
+        b64 = base64.b64encode(text[:3000].encode('utf-8')).decode('ascii')
+        return f"""
+<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;">
+  <span id="tts_data_{btn_id}" style="display:none">{b64}</span>
+  <button id="btn_speak_{btn_id}"
+    onclick="(function(){{
+      if(!('speechSynthesis' in window)){{alert('Browser tidak mendukung TTS');return;}}
+      window.speechSynthesis.cancel();
+
+      var raw = document.getElementById('tts_data_{btn_id}').textContent;
+      var txt = decodeURIComponent(escape(atob(raw)));
+      var btn = document.getElementById('btn_speak_{btn_id}');
+
+      // Ambil pilihan suara & kecepatan dari selector di frame induk
+      var voiceName = '';
+      var rate = 0.92;
+      try {{
+        var topDoc = window.top.document;
+        var vSel = topDoc.getElementById('tts-voice-select');
+        var rSel = topDoc.getElementById('tts-rate-select');
+        if(vSel) voiceName = vSel.value;
+        if(rSel) rate = parseFloat(rSel.value) || 0.92;
+      }} catch(e) {{
+        // fallback: coba localStorage
+        try{{ voiceName = localStorage.getItem('tts_voice') || ''; }}catch(e2){{}}
+      }}
+
+      var voices = window.speechSynthesis.getVoices();
+      var chosenVoice = null;
+      if(voiceName) chosenVoice = voices.find(function(v){{return v.name===voiceName;}});
+      if(!chosenVoice) chosenVoice = voices.find(function(v){{return v.lang.startsWith('id');}});
+      if(!chosenVoice) chosenVoice = voices.find(function(v){{return v.lang.startsWith('ms');}});
+      if(!chosenVoice) chosenVoice = voices.find(function(v){{return v.lang.startsWith('en');}});
+
+      // Pecah per kalimat agar tidak terpotong browser
+      var sentences = txt.match(/[^.!?\\n]{{1,220}}[.!?\\n]?/g) || [txt];
+      btn.textContent = '⏳ Membaca...';
+      btn.style.borderColor = 'rgba(16,185,129,0.6)';
+      btn.style.color = '#6ee7b7';
+
+      function speakChunk(i){{
+        if(i >= sentences.length){{
+          btn.textContent='🔊 Bacakan';
+          btn.style.borderColor='rgba(99,102,241,0.4)';
+          btn.style.color='#a5b4fc';
+          return;
+        }}
+        var u = new SpeechSynthesisUtterance(sentences[i]);
+        u.lang = 'id-ID';
+        u.rate = rate;
+        u.pitch = 1.0;
+        if(chosenVoice) u.voice = chosenVoice;
+        u.onend  = function(){{ speakChunk(i+1); }};
+        u.onerror = function(){{
+          btn.textContent='🔊 Bacakan';
+          btn.style.borderColor='rgba(99,102,241,0.4)';
+          btn.style.color='#a5b4fc';
+        }};
+        window.speechSynthesis.speak(u);
+      }}
+
+      function startSpeak(){{
+        if(window.speechSynthesis.getVoices().length===0){{
+          window.speechSynthesis.onvoiceschanged=function(){{ speakChunk(0); }};
+        }} else {{
+          speakChunk(0);
+        }}
+      }}
+      startSpeak();
+    }})()"
+    style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.4);
+           color:#a5b4fc;font-size:0.72rem;padding:4px 12px;border-radius:99px;
+           cursor:pointer;font-family:sans-serif;transition:all 0.2s;">
+    🔊 Bacakan
+  </button>
+  <button onclick="(function(){{
+      window.speechSynthesis.cancel();
+      var b=document.getElementById('btn_speak_{btn_id}');
+      if(b){{b.textContent='🔊 Bacakan';b.style.borderColor='rgba(99,102,241,0.4)';b.style.color='#a5b4fc';}}
+    }})()"
+    style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);
+           color:#fca5a5;font-size:0.72rem;padding:4px 12px;border-radius:99px;
+           cursor:pointer;font-family:sans-serif;transition:all 0.2s;">
+    ⏹ Stop
+  </button>
+</div>
+"""
 
     # Inisialisasi riwayat
     if '_chat_history' not in st.session_state:
         st.session_state['_chat_history'] = []
 
     # Tampilkan riwayat
-    for msg in st.session_state['_chat_history']:
+    for idx, msg in enumerate(st.session_state['_chat_history']):
         with st.chat_message(msg['role'], avatar='🧑' if msg['role'] == 'user' else '🤖'):
             st.markdown(msg['content'])
             if msg['role'] == 'assistant':
-                _clean    = re.sub(r'[*_`#>\-]+', '', msg['content'])
-                _clean    = re.sub(r'\s+', ' ', _clean).strip()
-                _clean_js = _clean.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
-                _components.html(
-                    f"""<div style="margin-top:4px;">
-                    <button onclick="parent.window._tts_speak('{_clean_js}')"
-                        style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);
-                               color:#a5b4fc;font-size:0.72rem;padding:3px 10px;border-radius:99px;
-                               cursor:pointer;font-family:sans-serif;transition:all 0.2s;"
-                        onmouseover="this.style.background='rgba(99,102,241,0.3)'"
-                        onmouseout="this.style.background='rgba(99,102,241,0.15)'">🔊 Bacakan</button>
-                    <button onclick="parent.window._tts_stop()"
-                        style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);
-                               color:#fca5a5;font-size:0.72rem;padding:3px 10px;border-radius:99px;
-                               cursor:pointer;font-family:sans-serif;margin-left:6px;transition:all 0.2s;"
-                        onmouseover="this.style.background='rgba(239,68,68,0.25)'"
-                        onmouseout="this.style.background='rgba(239,68,68,0.1)'">⏹ Stop</button>
-                    </div>""", height=36
-                )
+                _clean = re.sub(r'[*_`#>\-]+', '', msg['content'])
+                _clean = re.sub(r'\s+', ' ', _clean).strip()
+                _components.html(_tts_html(_clean, f"hist_{idx}"), height=44)
 
     # Input
     user_input = st.chat_input(
-        "Tanya seputar ISO/SNI atau isi dokumen... Misal: Apa itu SNI? · Ringkas dokumen · Apa isi BAB 4?"
+        "Tanya seputar ISO/SNI atau isi dokumen...?"
     )
 
     if user_input:
@@ -1171,7 +1374,7 @@ with st.expander(_exp_label, expanded=True):
             st.markdown(user_input)
 
         with st.chat_message('assistant', avatar='🤖'):
-            with st.spinner("Z.ai GLM sedang menganalisis..."):
+            with st.spinner("asistant sedang menganalisis..."):
                 if has_doc:
                     doc_ctx = _build_doc_context(sections, max_chars=14000)
                     system_prompt = (
@@ -1194,21 +1397,9 @@ with st.expander(_exp_label, expanded=True):
                 reply = _claude_chat(system_prompt, api_messages)
 
             st.markdown(reply)
-            _clean    = re.sub(r'[*_`#>\-]+', '', reply)
-            _clean    = re.sub(r'\s+', ' ', _clean).strip()
-            _clean_js = _clean.replace("'", "\\'").replace('"', '\\"').replace('\n', ' ')
-            _components.html(
-                f"""<div style="margin-top:4px;">
-                <button onclick="parent.window._tts_speak('{_clean_js}')"
-                    style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);
-                           color:#a5b4fc;font-size:0.72rem;padding:3px 10px;border-radius:99px;
-                           cursor:pointer;font-family:sans-serif;">🔊 Bacakan</button>
-                <button onclick="parent.window._tts_stop()"
-                    style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);
-                           color:#fca5a5;font-size:0.72rem;padding:3px 10px;border-radius:99px;
-                           cursor:pointer;font-family:sans-serif;margin-left:6px;">⏹ Stop</button>
-                </div>""", height=36
-            )
+            _clean = re.sub(r'[*_`#>\-]+', '', reply)
+            _clean = re.sub(r'\s+', ' ', _clean).strip()
+            _components.html(_tts_html(_clean, f"new_{int(time.time())}"), height=44)
             st.session_state['_chat_history'].append({'role': 'assistant', 'content': reply})
 
     if st.session_state.get('_chat_history'):
@@ -1217,7 +1408,11 @@ with st.expander(_exp_label, expanded=True):
             st.rerun()
 
 # --- FOOTER ---
+_now = time.strftime("%H:%M")
 st.markdown(
-    "<div class='footer'>© 2026 <span>ISO Doc Master</span> · Badan Standardisasi Nasional · All rights reserved.</div>",
+    f"<div class='footer'>"
+    f"© 2026 <span>ISO Doc Master</span> · Badan Standardisasi Nasional · All rights reserved."
+    f"<br><span style='font-size:0.68rem;opacity:0.5;'>🛡️ File temporer dihapus otomatis setiap 30 menit &nbsp;·&nbsp; Terakhir dicek: {_now}</span>"
+    f"</div>",
     unsafe_allow_html=True
 )
