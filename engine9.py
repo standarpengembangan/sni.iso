@@ -5,6 +5,8 @@ Upgrade:
   - Dual Title Sync: Mengambil Judul ID (Bold) & EN (Italic) dari Cover.
   - Sinkronisasi ke Kata Pengantar: Mengganti Judul ID & Judul EN
     dengan formatting Italic yang benar.
+  - [FIX] _sync_body_title: Membatasi pencarian judul hanya di awal dokumen
+    untuk mencegah penggantian judul "Informasi Pendukung" di halaman akhir.
 """
 
 import re
@@ -53,9 +55,6 @@ _EM_DASH = '—'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # URL KAMUS ISTILAH — HARDCODED DARI GOOGLE SPREADSHEET
-# Ganti URL di bawah dengan link Google Sheet kamus Anda.
-# Sheet harus bisa diakses publik (Anyone with the link → Viewer).
-# Format kolom: kolom pertama = istilah asing, kolom kedua = terjemahan Indonesia.
 # ─────────────────────────────────────────────────────────────────────────────
 KAMUS_SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1BBPCMPwvbBk5LPdoDQwnjQzcPHv7_RDKENqeMsklF-8/edit?usp=sharing"
 
@@ -261,7 +260,6 @@ def _all_runs_italic(para) -> bool:
 def _fix_annex_style_para(para, annex_letter: str = None) -> None:
     sid = _get_para_style_id(para)
     if sid not in _ANNEX_STYLE_IDS: return
-    # Ekstraksi teks aman — abaikan run yang hanya berisi <w:br/>
     full_text = ''.join(r.text for r in para.runs if r.text is not None).strip()
     if not full_text: return
     tag_norm = None; title_part = full_text
@@ -275,7 +273,6 @@ def _fix_annex_style_para(para, annex_letter: str = None) -> None:
             part_after  = full_text[idx + len(t):]
             title_part  = part_before + " " + part_after
             break
-    # Ekstrak huruf dari "Annex X" atau "Lampiran X", fallback ke annex_letter
     annex_label = None
     m_annex = re.match(r'^(?:Annex|Lampiran)\s+([A-Z0-9\.]+)\s*', title_part, flags=re.IGNORECASE)
     if m_annex:
@@ -290,7 +287,6 @@ def _fix_annex_style_para(para, annex_letter: str = None) -> None:
     pPr = para._element.find(f'{_W}pPr')
     if pPr is None:
         pPr = etree.SubElement(para._element, f'{_W}pPr')
-    # Set numId=0 untuk matikan autonumbering "Annex %1" yang di-inherit dari style
     old_numPr = pPr.find(f'{_W}numPr')
     if old_numPr is not None: pPr.remove(old_numPr)
     pPr.insert(0, etree.fromstring(
@@ -299,7 +295,6 @@ def _fix_annex_style_para(para, annex_letter: str = None) -> None:
     for child in list(para._element):
         if child is not pPr: para._element.remove(child)
     
-    # FIXED: sz w:val="24" -> 12pt
     def make_arial_run(text, is_bold=False):
         esc = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         b_tag = '<w:b/><w:bCs/>' if is_bold else ''
@@ -380,22 +375,12 @@ def _convert_emdash_to_bullets(doc: Document) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fix_note_para(para) -> None:
-    """
-    Split paragraf Note/Catatan menjadi dua run:
-      - Label (CATATAN, NOTE, CATATAN 1:, dll.) → Bold
-      - Isi teks                                 → Not Bold
-    """
     full_text = para.text.strip()
-    if not full_text:
-        return
+    if not full_text: return
     txt_lower = full_text.lower()
-    if not (txt_lower.startswith('note') or txt_lower.startswith('catatan')):
-        return
+    if not (txt_lower.startswith('note') or txt_lower.startswith('catatan')): return
 
-    m = re.match(
-        r'^((?:NOTE|CATATAN)\s*\d*\s*(?:to\s+entry\s*)?:?)\s*',
-        full_text, re.IGNORECASE
-    )
+    m = re.match(r'^((?:NOTE|CATATAN)\s*\d*\s*(?:to\s+entry\s*)?:?)\s*', full_text, re.IGNORECASE)
     if m:
         bold_part   = m.group(1).rstrip()
         normal_part = full_text[m.end():]
@@ -408,8 +393,7 @@ def _fix_note_para(para) -> None:
         bold_part   = words[0]
         normal_part = words[1] if len(words) > 1 else ''
 
-    if not normal_part.strip():
-        return
+    if not normal_part.strip(): return
 
     font_name = 'Arial'
     font_size = None
@@ -434,7 +418,6 @@ def _fix_note_para(para) -> None:
 
 
 def _fix_all_notes(doc: Document) -> None:
-    """Post-processing: terapkan _fix_note_para ke seluruh body dan tabel."""
     for para in doc.paragraphs:
         _fix_note_para(para)
     for table in doc.tables:
@@ -665,51 +648,34 @@ def _translate_hf(hf_part, tr) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_cover_titles(doc: Document) -> tuple[str, str]:
-    """
-    Mengekstrak Judul Indonesia dan Judul Inggris dari halaman Cover.
-    Return: (id_title, en_title)
-    """
     id_title = ""; en_title = ""
-    
     for para in doc.paragraphs:
-        if _has_inline_sectpr(para): break # Stop di section break pertama
-        
+        if _has_inline_sectpr(para): break
         text = para.text.strip()
         if not text: continue
-        
         is_bold = False; is_italic = False; max_size = 0
-        
         for run in para.runs:
             if run.text.strip():
                 if run.font.bold: is_bold = True
                 if run.font.italic: is_italic = True
                 sz = run.font.size
                 if sz and sz.pt > max_size: max_size = sz.pt
-        
-        # 1. Cari Judul ID (Bold, Non-Italic) - Biasanya ukuran paling besar
         if not id_title:
             if max_size >= 16 and is_bold and not is_italic:
                 id_title = text
                 continue
-        
-        # 2. Cari Judul EN (Italic) - Biasanya setelah ID
         if id_title and not en_title:
-            # Engine 4 membuat EN dengan size 16pt, Bold Italic.
-            # Kriteria: Italic adalah pembeda utama.
             if max_size >= 14 and is_italic:
                 en_title = text
-    
     return id_title, en_title
 
 
 def _sync_body_title(doc: Document, cover_id: str) -> bool:
     """
-    Mencari judul dokumen di awal konten body (sebelum Heading 1 pertama),
-    lalu menggantinya dengan judul Indonesia yang sudah diterjemahkan dari cover.
-
-    Strategi deteksi (prioritas urutan):
-    1. Style 'Main Title 2', 'boxedTitle', atau varian serupa
-    2. Paragraf bold+centered setelah section break TERAKHIR sebelum Heading 1
+    Mencari judul dokumen di awal konten body (setelah cover, sebelum Heading 1),
+    lalu menggantinya dengan judul Indonesia dari cover.
+    [FIXED] Membatasi pencarian hanya di awal dokumen untuk menghindari mengganti judul
+    di halaman 'Informasi Pendukung' (akhir dokumen).
     """
     if not cover_id:
         return False
@@ -718,8 +684,44 @@ def _sync_body_title(doc: Document, cover_id: str) -> bool:
                           'boxedtitle', 'boxed title', 'body title'}
     _RE_HEADING1 = re.compile(r'^\d+\s+\S')
 
-    # ── Pass 1: cari berdasarkan style name ──────────────────────────────────
-    for para in doc.paragraphs:
+    paragraphs = doc.paragraphs
+
+    # ── Step 1: Identifikasi batas pencarian ──────────────────────────────────
+    # Kita mencari Section Break PERTAMA (akhir cover) dan Heading 1 PERTAMA.
+    
+    first_section_break_idx = -1
+    first_heading1_idx = -1
+    
+    for i, para in enumerate(paragraphs):
+        # Catat section break pertama
+        if first_section_break_idx == -1 and _has_inline_sectpr(para):
+            first_section_break_idx = i
+            
+        txt = para.text.strip()
+        # Cek Heading 1
+        if txt and _RE_HEADING1.match(txt) and (para.style and 'heading' in (para.style.name or '').lower()):
+            first_heading1_idx = i
+            break # Stop begitu ketemu Heading 1
+
+    # ── Step 2: Tentukan rentang indeks paragraf ─────────────────────────────
+    # Start: Setelah section break pertama (akhir cover).
+    # Jika tidak ada section break, mulai dari awal.
+    start_idx = first_section_break_idx + 1 if first_section_break_idx != -1 else 0
+    
+    # End: Sebelum Heading 1 pertama.
+    # Jika Heading 1 tidak ditemukan, HANYA ambil 20 paragraf pertama setelah cover.
+    # Ini mencegah fungsi menyentuh bagian akhir dokumen (Informasi Pendukung).
+    if first_heading1_idx != -1:
+        end_idx = first_heading1_idx
+    else:
+        # Fallback safety: scan hanya 20 paragraf setelah cover
+        end_idx = start_idx + 20 
+
+    if end_idx > len(paragraphs): end_idx = len(paragraphs)
+
+    # ── Pass 1: Cari berdasarkan style name ───────────────────────────────────
+    for i in range(start_idx, end_idx):
+        para = paragraphs[i]
         style_name = (para.style.name or '').lower().strip() if para.style else ''
         if style_name not in _BODY_TITLE_STYLES:
             continue
@@ -729,25 +731,8 @@ def _sync_body_title(doc: Document, cover_id: str) -> bool:
         _replace_para_text(para, cover_id)
         return True
 
-    # ── Pass 2: fallback — bold+centered setelah section break terakhir ──────
-    # Temukan dulu indeks section break terakhir sebelum Heading 1
-    last_sec_idx  = -1
-    heading1_idx  = -1
-    paragraphs    = doc.paragraphs
-
-    for i, para in enumerate(paragraphs):
-        if _has_inline_sectpr(para):
-            last_sec_idx = i
-        txt = para.text.strip()
-        if txt and _RE_HEADING1.match(txt) and (para.style and 'heading' in (para.style.name or '').lower()):
-            heading1_idx = i
-            break
-
-    if last_sec_idx < 0:
-        return False
-
-    limit = heading1_idx if heading1_idx > 0 else len(paragraphs)
-    for i in range(last_sec_idx + 1, limit):
+    # ── Pass 2: Fallback — Bold + Centered ───────────────────────────────────
+    for i in range(start_idx, end_idx):
         para = paragraphs[i]
         txt  = para.text.strip()
         if not txt:
@@ -762,7 +747,6 @@ def _sync_body_title(doc: Document, cover_id: str) -> bool:
 
 
 def _replace_para_text(para, new_text: str) -> None:
-    """Ganti seluruh teks paragraf dengan new_text, pertahankan font dari run pertama."""
     font_name = 'Arial'
     font_size = None
     for run in para.runs:
@@ -783,76 +767,54 @@ def _replace_para_text(para, new_text: str) -> None:
 
 
 def _sync_foreword_title(doc: Document, cover_id: str, cover_en: str) -> None:
-    """
-    Menyinkronkan judul ID dan EN di Kata Pengantar.
-    Struktur Paragraf (Engine 6):
-    "SNI [No], [Judul ID], merupakan standar ... identik dari [Ref], [Judul EN], dengan metode..."
-    """
     if not cover_id: return
-
-    # Regex untuk memecah paragraf menjadi 5 bagian:
-    # 1. Awal: "SNI [No], "
-    # 2. Judul ID Lama
-    # 3. Tengah: ", merupakan standar ... identik dari [Ref], "
-    # 4. Judul EN Lama
-    # 5. Akhir: ", dengan metode ..."
-    
     pattern = re.compile(
-        r'^(SNI [^,]+,\s*)'                 # Group 1: Awal
-        r'(.*?)'                            # Group 2: Judul ID Lama
-        r'(,\s*merupakan standar.*?identik dari [^,]+,\s*)' # Group 3: Tengah (termasuk Ref Standard)
-        r'(.*?)'                            # Group 4: Judul EN Lama
-        r'(,\s*dengan metode.*)',           # Group 5: Akhir
+        r'^(SNI [^,]+,\s*)'
+        r'(.*?)'
+        r'(,\s*merupakan standar.*?identik dari [^,]+,\s*)'
+        r'(.*?)'
+        r'(,\s*dengan metode.*)',
         re.IGNORECASE | re.DOTALL
     )
 
     for para in doc.paragraphs:
         text = para.text.strip()
         match = pattern.match(text)
-        
         if match:
             pPr = para._element.pPr
             if pPr is None: continue
             
-            # Clear old runs
             for run in para.runs:
                 run._element.getparent().remove(run._element)
             
-            # Reconstruct Paragraph
-            
-            # 1. SNI Number
             run_1 = para.add_run(match.group(1))
             run_1.font.name = "Arial"
             run_1.font.size = Pt(11)
             run_1.italic = False
             
-            # 2. Judul ID (dari Cover) - ITALIC
             run_2 = para.add_run(cover_id)
             run_2.font.name = "Arial"
             run_2.font.size = Pt(11)
-            run_2.italic = True  # Sesuai standar SNI
+            run_2.italic = True
             
-            # 3. Tengah (Merupakan standar... identik dari...)
             run_3 = para.add_run(match.group(3))
             run_3.font.name = "Arial"
             run_3.font.size = Pt(11)
             run_3.italic = False
             
-            # 4. Judul EN (dari Cover) - ITALIC (jika ada)
             if cover_en:
                 run_4 = para.add_run(cover_en)
                 run_4.font.name = "Arial"
                 run_4.font.size = Pt(11)
-                run_4.italic = True # Sesuai permintaan
+                run_4.italic = True 
             
-            # 5. Akhir (Dengan metode...)
             run_5 = para.add_run(match.group(5))
             run_5.font.name = "Arial"
             run_5.font.size = Pt(11)
             run_5.italic = False
             
             para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            break # Selesai
+            break
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -902,7 +864,7 @@ class DocxFinalTranslatorEngine:
             total             = len(items)
             done              = 0
             past_bibliography = False
-            annex_counter     = 0  # counter untuk Lampiran A, B, C, ...
+            annex_counter     = 0
 
             for kind, obj, in_cover in items:
                 done += 1
@@ -948,25 +910,22 @@ class DocxFinalTranslatorEngine:
 
             _insert_original_before_bib(translated_doc=doc, orig_body_els=orig_body_els, progress_callback=_insert_cb)
 
-            # ── SINKRONISASI JUDUL COVER (UPDATED) ────────────────────────────
+            # ── SINKRONISASI JUDUL (UPDATED WITH FIX) ────────────────────────────
             _notify(progress_callback, 96, "Menyinkronkan judul Cover dengan Kata Pengantar...")
             
-            # 1. Ambil KEDUA judul dari Cover
             final_id_title, final_en_title = _extract_cover_titles(doc)
             
-            # 2. Sinkronkan ke Kata Pengantar
             if final_id_title:
                 _sync_foreword_title(doc, final_id_title, final_en_title)
                 msg = f"Judul ID: {final_id_title[:30]}..."
                 if final_en_title: msg += f" | Judul EN: {final_en_title[:30]}..."
                 _notify(progress_callback, 97, f"Judul disinkronkan: {msg}")
 
-                # 3. Sinkronkan judul body (bold centered sebelum Heading 1)
+                # Sinkronkan judul body (dengan fungsi yang sudah di-fix)
                 body_synced = _sync_body_title(doc, final_id_title)
                 _notify(progress_callback, 98, f"Judul body {'diperbarui' if body_synced else 'tidak ditemukan'}.")
             else:
                 _notify(progress_callback, 97, "Judul cover tidak ditemukan, skip sinkronisasi.")
-            # ─────────────────────────────────────────────────────────────
 
             _notify(progress_callback, 97, "Saving...")
             doc.save(output_docx)
