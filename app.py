@@ -1363,7 +1363,176 @@ with st.expander(_exp_label, expanded=True):
                 _clean = re.sub(r'\s+', ' ', _clean).strip()
                 _components.html(_tts_html(_clean, f"hist_{idx}"), height=44)
 
-    # Input
+    # ── Voice Input — tombol mikrofon di samping chat input ─────────────────
+    st.markdown("""
+<style>
+div[data-testid="stChatInput"] { position: relative !important; }
+div[data-testid="stChatInput"] textarea { padding-right: 115px !important; }
+#mic-float-btn {
+    position: absolute; right: 52px; bottom: 10px; z-index: 999;
+    background: linear-gradient(135deg, #6366f1, #4f46e5);
+    border: none; color: #fff; font-size: 0.78rem; font-weight: 700;
+    padding: 6px 13px; border-radius: 99px; cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    box-shadow: 0 2px 10px rgba(99,102,241,0.4);
+    transition: all 0.2s; white-space: nowrap;
+}
+#mic-float-btn:hover { background: linear-gradient(135deg,#818cf8,#6366f1); }
+#mic-float-btn.listening {
+    background: linear-gradient(135deg,#ef4444,#dc2626) !important;
+    animation: mic-pulse 1s infinite;
+}
+@keyframes mic-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+    70%  { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+    100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+}
+#mic-toast {
+    display: none; position: fixed; bottom: 90px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15,23,42,0.95); border: 1px solid rgba(99,102,241,0.4);
+    border-radius: 12px; padding: 8px 18px; font-size: 0.8rem;
+    color: #c7d2fe; font-family: sans-serif; z-index: 9999;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4); white-space: nowrap;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    _components.html("""
+<script>
+(function(){
+  var top = window.top;
+
+  // ── State di window.top agar bertahan saat iframe di-recreate oleh Streamlit
+  if (!top._mic) top._mic = { rec: null, listening: false, toast_timer: null };
+  var M = top._mic;
+
+  function showToast(msg, ms) {
+    var t = top.document.getElementById('mic-toast');
+    if (!t) return;
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(M.toast_timer);
+    if (ms) M.toast_timer = top.setTimeout(function(){ t.style.display='none'; }, ms);
+  }
+
+  function getBtn() { return top.document.getElementById('mic-float-btn'); }
+
+  function resetBtn() {
+    var b = getBtn();
+    if (b) { b.innerHTML = '🎤 Bicara'; b.classList.remove('listening'); }
+  }
+
+  function forceStop() {
+    if (M.rec) { try { M.rec.abort(); } catch(e){} M.rec = null; }
+    M.listening = false;
+    resetBtn();
+  }
+
+  function toggleMic() {
+    if (M.listening) { forceStop(); showToast('⏹ Dihentikan', 1500); return; }
+
+    var SR = top.SpeechRecognition || top.webkitSpeechRecognition;
+    if (!SR) { showToast('❌ Gunakan Chrome/Edge untuk voice input', 3000); return; }
+
+    forceStop(); // bersihkan sisa sesi lama
+
+    var rec = new SR();
+    rec.lang = 'id-ID'; rec.continuous = false;
+    rec.interimResults = true; rec.maxAlternatives = 1;
+    M.rec = rec;
+
+    var lastTxt = '';
+
+    rec.onstart = function() {
+      M.listening = true;
+      var b = getBtn();
+      if (b) { b.innerHTML = '🔴 Stop'; b.classList.add('listening'); }
+      showToast('🎤 Sedang mendengarkan...');
+    };
+
+    rec.onresult = function(e) {
+      var interim='', final_t='';
+      for (var i=e.resultIndex; i<e.results.length; i++) {
+        if (e.results[i].isFinal) final_t += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      lastTxt = final_t || interim;
+      showToast('💬 ' + lastTxt);
+    };
+
+    rec.onend = function() {
+      M.rec = null; M.listening = false;
+      resetBtn();
+
+      var txt = lastTxt.trim(); lastTxt = '';
+      if (!txt) { showToast('⚠️ Tidak terdeteksi — coba lagi', 2500); return; }
+
+      var ta = top.document.querySelector('div[data-testid="stChatInput"] textarea');
+      if (!ta) { showToast('⚠️ Input tidak ditemukan', 2500); return; }
+
+      var setter = Object.getOwnPropertyDescriptor(top.HTMLTextAreaElement.prototype,'value').set;
+      setter.call(ta, txt);
+      ta.dispatchEvent(new Event('input',  {bubbles:true}));
+      ta.dispatchEvent(new Event('change', {bubbles:true}));
+
+      top.setTimeout(function(){
+        ['keydown','keypress','keyup'].forEach(function(ev){
+          ta.dispatchEvent(new top.KeyboardEvent(ev,{
+            key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true
+          }));
+        });
+        var t = top.document.getElementById('mic-toast');
+        if (t) t.style.display = 'none';
+      }, 150);
+    };
+
+    rec.onerror = function(e) {
+      M.rec = null; M.listening = false; resetBtn();
+      if (e.error === 'aborted') return;
+      var msgs = {
+        'no-speech'    :'⚠️ Tidak ada suara — coba lagi',
+        'not-allowed'  :'❌ Izin mikrofon ditolak',
+        'audio-capture':'❌ Mikrofon tidak ditemukan',
+        'network'      :'❌ Gangguan jaringan'
+      };
+      showToast(msgs[e.error]||('❌ Error: '+e.error), 3000);
+    };
+
+    rec.start();
+  }
+
+  // ── Inject UI ke parent — hapus duplikat dulu setiap Streamlit rerun ──────
+  function injectUI() {
+    var D = top.document;
+    var wrap = D.querySelector('div[data-testid="stChatInput"]');
+    if (!wrap) { top.setTimeout(injectUI, 400); return; }
+
+    // Hapus tombol lama (Streamlit rerun merusak onclick reference)
+    var old = D.getElementById('mic-float-btn');
+    if (old) old.remove();
+
+    wrap.style.position = 'relative';
+    var btn = D.createElement('button');
+    btn.id = 'mic-float-btn';
+    btn.innerHTML = M.listening ? '🔴 Stop' : '🎤 Bicara';
+    if (M.listening) btn.classList.add('listening');
+    btn.onclick = toggleMic;
+    wrap.appendChild(btn);
+
+    if (!D.getElementById('mic-toast')) {
+      var toast = D.createElement('div');
+      toast.id = 'mic-toast';
+      D.body.appendChild(toast);
+    }
+  }
+
+  injectUI();
+  top.setTimeout(injectUI, 700);
+})();
+</script>
+""", height=0)
+
+    # Input teks
     user_input = st.chat_input(
         "Tanya seputar ISO/SNI atau isi dokumen...?"
     )
