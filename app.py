@@ -666,9 +666,9 @@ _status_html = (
 
 st.markdown(f"""
     <div class="app-header">
-        <div class="badge">BSN · ISO · SNI</div>
-        <h1>📑 ISO Doc Master</h1>
-        <p>Optimasi & Terjemahan Dokumen Standar ISO/SNI secara otomatis</p>
+        <div class="badge">TTI · ISO · SNI</div>
+        <h1>📑 ISO/SNI Master Formating</h1>
+        <p>Formating & Terjemahan Dokumen Standar ISO/SNI secara otomatis</p>
         <div class="stats-row">
             <div class="stat-item">
                 <div class="stat-num">6</div>
@@ -699,7 +699,7 @@ uploaded_file = st.file_uploader("Upload file .docx di sini atau klik Browse", t
 st.markdown('<div class="section-label">⚙️ Pengaturan</div>', unsafe_allow_html=True)
 col_set1, col_set2 = st.columns([3, 2])
 with col_set1:
-    doc_title = st.text_input("📄 Judul Dokumen (untuk header)", value="SNI ISO 15118-1:2019", key="title_main")
+    doc_title = st.text_input("📄 Masukan No. SNI", value="SNI ISO xxxxx-x:xxxx", key="title_main")
 with col_set2:
     src_lang = st.selectbox(
         "🌐 Bahasa Sumber",
@@ -709,7 +709,7 @@ with col_set2:
         key="lang_main"
     )
 
-btn_process = st.button("🚀 Proses Optimasi & Terjemahan", key="btn_main", use_container_width=True)
+btn_process = st.button("🚀 Proses Formating & Terjemahan", key="btn_main", use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -758,7 +758,7 @@ if st.session_state.get('_run_process') and st.session_state.get('_target_file')
 
     # Pipeline Optimasi
     def run_optimization(input_file, doc_title):
-        copyright_text = f"©BSN {_tahun}"
+        copyright_text = f"© BSN {_tahun}"
         cover_settings = {
             "sni_number": doc_title if doc_title else "SNI ISO XXXXX:20XX",
             "bsn_year": _tahun, "ics_number": "XX.XXX.XX", "ref_standard": "",
@@ -858,7 +858,7 @@ if st.session_state.get('_show_results'):
         with col_res1:
             with open(opt_file, "rb") as f:
                 st.download_button(
-                    label="📄 Download Hasil Optimasi",
+                    label="📄 Download Hasil Formating",
                     data=f,
                     file_name="ISO_Fixed_Document.docx",
                     use_container_width=True
@@ -1607,7 +1607,7 @@ with st.expander(_exp_label, expanded=True):
 _now = time.strftime("%H:%M")
 st.markdown(
     f"<div class='footer'>"
-    f"© 2026 <span>ISO Doc Master</span> · Badan Standardisasi Nasional · All rights reserved."
+    f"© 2026 <span>ISO/SNI Master Formating</span> · Transportasi dan Teknologi Informasi · All rights reserved."
     f"<br><span style='font-size:0.68rem;opacity:0.5;'>🛡️ File temporer dihapus otomatis setiap 30 menit &nbsp;·&nbsp; Terakhir dicek: {_now}</span>"
     f"</div>",
     unsafe_allow_html=True
