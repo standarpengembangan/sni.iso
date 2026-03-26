@@ -667,8 +667,8 @@ _status_html = (
 st.markdown(f"""
     <div class="app-header">
         <div class="badge">Generator RSNI</div>
-        <h1>📑 ISO to SNI Master Formating</h1>
-        <p>Memformat & menerjemahan Dokumen Standar ISO menjadi Draft RSNI secara otomatis</p>
+        <h1>📑 ISO to RSNI Converter</h1>
+        <p>Memformat & Menerjemahan Dokumen Standar ISO Menjadi Draft RSNI Secara Otomatis</p>
         <div class="stats-row">
             <div class="stat-item">
                 <div class="stat-num">6</div>
@@ -969,7 +969,7 @@ def _local_answer(query: str, sections: list, history: list) -> str:
             for s in ref_secs:
                 results.append(f"**{s['heading']}**\n{_section_text(s, 800)}")
             return "📚 **Referensi & Acuan Normatif:**\n\n" + "\n\n---\n\n".join(results)
-        # Cari ISO/SNI/IEC dalam seluruh dokumen
+        # Cari SNI/ISO/IEC dalam seluruh dokumen
         found = []
         for s in sections:
             for p in s['paragraphs']:
@@ -1169,7 +1169,7 @@ with st.expander(_exp_label, expanded=True):
         if has_doc else
         f"<span style='background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);"
         f"color:rgba(255,255,255,0.3);font-size:0.75rem;padding:0.2rem 0.7rem;border-radius:99px;'>"
-        f"📄 Belum ada dokumen — jawab hal umum ISO/SNI</span>"
+        f"📄 Belum ada dokumen — jawab hal umum RSNI</span>"
     )
     st.markdown(
         f"<div style='display:flex;gap:0.7rem;margin-bottom:0.8rem;flex-wrap:wrap;'>"
@@ -1584,7 +1584,7 @@ with st.expander(_exp_label, expanded=True):
                     system_prompt = (
                         "Kamu adalah asisten ahli RSNI dan dokumen teknis BSN. "
                         "Jawab dalam Bahasa Indonesia dengan jelas dan akurat. "
-                        "Belum ada dokumen — jawab berdasarkan pengetahuan umum ISO, SNI, IEC, dan standardisasi."
+                        "Belum ada dokumen — jawab berdasarkan pengetahuan umum SNI, ISO, IEC, dan standar lainnya."
                     )
                 api_messages = [
                     {"role": m['role'], "content": m['content']}
@@ -1607,7 +1607,7 @@ with st.expander(_exp_label, expanded=True):
 _now = time.strftime("%H:%M")
 st.markdown(
     f"<div class='footer'>"
-    f"© 2026 <span>ISO to RSNI Master Formating</span> · Generator RSNI · All rights reserved."
+    f"© 2026 <span>ISO to RSNI Converter</span> · Generator RSNI · All rights reserved."
     f"<br><span style='font-size:0.68rem;opacity:0.5;'>🛡️ File temporer dihapus otomatis setiap 30 menit &nbsp;·&nbsp; Terakhir dicek: {_now}</span>"
     f"</div>",
     unsafe_allow_html=True
