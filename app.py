@@ -11,6 +11,8 @@ from io import BytesIO
 # AUTO-CLEANUP — pembersihan file temporer otomatis
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Database kamus ada di https://bit.ly/kamusSNI
+
 # Pola file temporer yang dibuat oleh aplikasi
 _TEMP_PATTERNS = ["temp_main_*", "opt_*", "cover_*", "di_*", "pp_*", "ip_*", "ID_*"]
 # Hapus file lebih lama dari N menit
@@ -211,6 +213,7 @@ html, body, [class*="css"] {
 /* ══════════════════════════════════════════
    STATUS KAMUS — ganti st.success/warning
 ══════════════════════════════════════════ */
+
 div[data-testid="stAlert"] {
     border-radius: 14px !important;
     border: none !important;
@@ -694,7 +697,7 @@ _tahun = str(datetime.date.today().year)
 
 # --- FORM INPUT ---
 st.markdown('<div class="section-label">📂 Upload Dokumen ISO</div>', unsafe_allow_html=True)
-uploaded_file = st.file_uploader("Upload file .docx di sini atau klik Browse", type=["docx"], key="upl_main")
+uploaded_file = st.file_uploader("Upload file .docx di sini atau klik Browse", type=["docx"], key="upl_main", label_visibility="collapsed")
 
 st.markdown('<div class="section-label">⚙️ Pengaturan</div>', unsafe_allow_html=True)
 col_set1, col_set2 = st.columns([3, 2])
