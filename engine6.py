@@ -282,26 +282,28 @@ def _build_prakata(sni_number, title_id, title_en, ref_standard, bsn_year, num_i
     ), align='both'))
     xmls.append(_empty())
     for li in [
-        'ISO/IEC XXXX:YYY, ZZZ, telah diadopsi dengan tingkat keselarasan identik menjadi SNI ISO/IEC XXXX:YYYY, ZZZ'
+        'ISO/IEC XXXX-X:YYYY, ZZZZ, telah diadopsi dengan tingkat keselarasan identik menjadi SNI ISO/IEC XXXX-X:YYYY, ZZZZ'
     ]:
         xmls.append(_bullet_para(_run(li), num_id))
     xmls.append(_empty())
 
     for li in [
-        'ISO/IEC XXXX:YYY, ZZZ, telah diadopsi dengan tingkat keselarasan identik menjadi SNI ISO/IEC XXXX:YYYY, ZZZ'
+        'ISO/IEC XXXX-X:YYYY, ZZZZ, telah diadopsi dengan tingkat keselarasan identik menjadi SNI ISO/IEC XXXX-X:YYYY, ZZZZ'
     ]:
         xmls.append(_bullet_para(_run(li), num_id))
     xmls.append(_empty())
 
-    xmls.append(_para(_run(
-        'Standar ini disusun oleh Komite Teknis XX/YY, YYY. '
-        'Standar ini telah dibahas melalui rapat teknis dan disepakati dalam rapat konsensus '
-        'pada tanggal XXXX di YYYY, yang dihadiri oleh para pemangku kepentingan (stakeholders) '
-        'terkait yaitu perwakilan dari pemerintah, pelaku usaha, konsumen, dan pakar. '
-        'Standar ini telah melalui tahap jajak pendapat pada tanggal XXXX sampai dengan YYYY '
-        'dengan hasil akhir disetujui menjadi SNI.'
-    ), align='both'))
-    xmls.append(_empty())
+    p_runs = (
+        _run('Standar ini disusun oleh Komite Teknis XX-YY, ZZZZ. ')
+        + _run('Standar ini telah dibahas melalui rapat teknis dan disepakati dalam rapat konsensus ')
+        + _run('pada tanggal XXXX di YYYY, yang dihadiri oleh para pemangku kepentingan (')
+        + _run('stakeholders', italic=True)
+        + _run(') terkait yaitu perwakilan dari pemerintah, pelaku usaha, konsumen, dan pakar. ')
+        + _run('Standar ini telah melalui tahap jajak pendapat pada tanggal XXXX sampai dengan YYYY ')
+        + _run('dengan hasil akhir disetujui menjadi SNI.')
+        )
+
+    xmls.append(_para(p_runs, align='both'))
 
     xmls.append(_para(_run(
         'Untuk menghindari kesalahan dalam penggunaan Standar ini, disarankan bagi pengguna '
