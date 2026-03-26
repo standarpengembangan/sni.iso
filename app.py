@@ -709,7 +709,7 @@ with col_set2:
         key="lang_main"
     )
 
-btn_process = st.button("🚀 Proses Formating & Terjemahan", key="btn_main", use_container_width=True)
+btn_process = st.button("🚀 Proses", key="btn_main", use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1117,9 +1117,9 @@ st.divider()
 import streamlit.components.v1 as _components
 
 _exp_label = (
-    f"🤖 Asisten Dokumen AI  ·  {n_sec} bagian  ·  {n_para} paragraf"
+    f"🤖 Asisten AI  ·  {n_sec} bagian  ·  {n_para} paragraf"
     if has_doc else
-    "🤖 Asisten Dokumen AI  ·  Tanya seputar ISO/SNI"
+    "🤖 Asisten AI  ·  Tanya seputar Draft RSNI"
 )
 
 # Inject CSS khusus expander AI tepat sebelum render
@@ -1561,7 +1561,7 @@ with st.expander(_exp_label, expanded=True):
 
     # Input teks
     user_input = st.chat_input(
-        "Tanya seputar ISO/SNI atau isi dokumen...?"
+        "Tanya seputar isi dokumen RSNI..."
     )
 
     if user_input:
@@ -1574,7 +1574,7 @@ with st.expander(_exp_label, expanded=True):
                 if has_doc:
                     doc_ctx = _build_doc_context(sections, max_chars=14000)
                     system_prompt = (
-                        "Kamu adalah asisten ahli standar ISO/SNI yang membantu pengguna memahami dokumen. "
+                        "Kamu adalah asisten ahli RSNI yang membantu pengguna memahami dokumen. "
                         "Jawab HANYA berdasarkan isi dokumen berikut. "
                         "Gunakan Bahasa Indonesia yang jelas, terstruktur, dan akurat. "
                         "Jika informasi tidak ada dalam dokumen, katakan dengan jujur.\n\n"
@@ -1582,7 +1582,7 @@ with st.expander(_exp_label, expanded=True):
                     )
                 else:
                     system_prompt = (
-                        "Kamu adalah asisten ahli standar ISO/SNI dan dokumen teknis BSN. "
+                        "Kamu adalah asisten ahli RSNI dan dokumen teknis BSN. "
                         "Jawab dalam Bahasa Indonesia dengan jelas dan akurat. "
                         "Belum ada dokumen — jawab berdasarkan pengetahuan umum ISO, SNI, IEC, dan standardisasi."
                     )
@@ -1607,7 +1607,7 @@ with st.expander(_exp_label, expanded=True):
 _now = time.strftime("%H:%M")
 st.markdown(
     f"<div class='footer'>"
-    f"© 2026 <span>ISO/SNI Master Formating</span> · Transportasi dan Teknologi Informasi · All rights reserved."
+    f"© 2026 <span>ISO to RSNI Master Formating</span> · Generator RSNI · All rights reserved."
     f"<br><span style='font-size:0.68rem;opacity:0.5;'>🛡️ File temporer dihapus otomatis setiap 30 menit &nbsp;·&nbsp; Terakhir dicek: {_now}</span>"
     f"</div>",
     unsafe_allow_html=True
