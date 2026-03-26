@@ -655,7 +655,7 @@ _count = len(_kamus) if _kamus else 0
 _status_html = (
     f"""<div class="status-pill status-ready">
         <span class="status-dot"></span>
-        Sistem Siap &nbsp;·&nbsp; Kamus Aktif: <strong>{_count} istilah</strong>
+        Sistem Siap &nbsp;
     </div>"""
     if _count > 0 else
     """<div class="status-pill status-warn">
