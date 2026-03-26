@@ -666,9 +666,9 @@ _status_html = (
 
 st.markdown(f"""
     <div class="app-header">
-        <div class="badge">TTI · ISO · SNI</div>
-        <h1>📑 ISO/SNI Master Formating</h1>
-        <p>Formating & Terjemahan Dokumen Standar ISO/SNI secara otomatis</p>
+        <div class="badge">Generator RSNI</div>
+        <h1>📑 ISO to SNI Master Formating</h1>
+        <p>Memformat & menerjemahan Dokumen Standar ISO menjadi Draft RSNI secara otomatis</p>
         <div class="stats-row">
             <div class="stat-item">
                 <div class="stat-num">6</div>
