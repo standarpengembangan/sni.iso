@@ -734,46 +734,8 @@ with col_set2:
         key="lang_main"
     )
 
-# --- TOMBOL PROSES + LOAD KAMUS BERDAMPINGAN ---
-_col_proses, _col_sync = st.columns(2)
-with _col_proses:
-    btn_process = st.button("🚀 Proses", key="btn_main", use_container_width=True)
-with _col_sync:
-    _btn_sync = st.button("🔄 Load Kamus", key="sync_kamus", use_container_width=True)
-
-# --- NOTIFIKASI SETELAH SINKRONISASI ---
-if _btn_sync:
-    with st.spinner("Memuat kamus dari Google Spreadsheet..."):
-        _load_kamus_from_sheet.clear()
-        for _k in ['custom_dict', 'kamus_count', 'italic_dict', 'italic_count']:
-            if _k in st.session_state:
-                del st.session_state[_k]
-        _d_new, _n_new, _i_new, _ni_new = _load_kamus_from_sheet()
-        st.session_state['custom_dict']  = _d_new
-        st.session_state['kamus_count']  = _n_new
-        st.session_state['italic_dict']  = _i_new
-        st.session_state['italic_count'] = _ni_new
-    _notif_kamus  = f"📖 **{_n_new} istilah terjemahan** aktif (Spreadsheet 1)" if _n_new > 0 else "⚠️ Kamus terjemahan kosong atau gagal dimuat"
-    _notif_italic = f"✍️ **{_ni_new} kata tidak diterjemahkan / italic** aktif (Spreadsheet 2)" if _ni_new > 0 else "⚠️ Daftar kata italic kosong atau gagal dimuat"
-    _notif_status = "✅ Sinkronisasi berhasil!" if (_n_new > 0 or _ni_new > 0) else "❌ Sinkronisasi gagal"
-    st.session_state['_kamus_notif'] = (
-        f"{_notif_status}  \n"
-        f"{_notif_kamus}  \n"
-        f"{_notif_italic}"
-    )
-    st.session_state['_kamus_notif_type'] = "success" if (_n_new > 0 or _ni_new > 0) else "error"
-    st.rerun()
-
-# --- TAMPILKAN NOTIFIKASI KAMUS (persisten setelah rerun) ---
-if st.session_state.get('_kamus_notif'):
-    if st.session_state.get('_kamus_notif_type') == "success":
-        st.success(st.session_state['_kamus_notif'])
-    else:
-        st.error(st.session_state['_kamus_notif'])
-    if st.button("✕ Tutup", key="close_kamus_notif"):
-        del st.session_state['_kamus_notif']
-        del st.session_state['_kamus_notif_type']
-        st.rerun()
+# --- TOMBOL PROSES ---
+btn_process = st.button("🚀 Proses", key="btn_main", use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1711,7 +1673,11 @@ _now = time.strftime("%H:%M")
 st.markdown(
     f"<div class='footer'>"
     f"© 2026 <span>ISO to RSNI Converter</span> · Generator RSNI · All rights reserved."
-    f"<br><span style='font-size:0.68rem;opacity:0.5;'>🛡️ File temporer dihapus otomatis setiap 30 menit &nbsp;·&nbsp; Terakhir dicek: {_now}</span>"
+    f"<br><span style='font-size:0.72rem;opacity:0.8;'>"
+    f"<a href='https://bit.ly/kamusSNI' target='_blank' style='color:#ffffff;text-decoration:none;'>📖 Kamus SNI</a>"
+    f"&nbsp;&nbsp;·&nbsp;&nbsp;"
+    f"<a href='https://bit.ly/kamusistilahasing2' target='_blank' style='color:#ffffff;text-decoration:none;'>🌐 Kamus Istilah Asing</a>"
+    f"</span>"
     f"</div>",
     unsafe_allow_html=True
 )
