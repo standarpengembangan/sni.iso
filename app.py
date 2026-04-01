@@ -72,7 +72,7 @@ from engine4 import CoverPageEngine
 from engine5 import DaftarIsiEngine
 from engine6 import PrakataPendahuluanEngine
 from engine7 import InfoPendukungEngine
-from engine9 import CustomDictionary, DocxFinalTranslatorEngine
+from engine9 import CustomDictionary, ItalicDictionary, DocxFinalTranslatorEngine
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(
@@ -548,6 +548,23 @@ hr {
 ══════════════════════════════════════════ */
 p, li, span, div { color: inherit; }
 .stApp p, .stApp div, .stApp label { color: rgba(255,255,255,0.75); }
+
+/* ══════════════════════════════════════════
+   TOMBOL LOAD KAMUS — IDENTIK DENGAN PROSES
+══════════════════════════════════════════ */
+.sync-icon-wrap .stButton > button {
+    height: 3.2rem !important;
+    border-radius: 14px !important;
+    font-weight: 700 !important;
+    font-size: 0.95rem !important;
+    letter-spacing: 0.3px !important;
+    border: none !important;
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 50%, #4338ca 100%) !important;
+    color: white !important;
+    box-shadow: 0 4px 20px rgba(99,102,241,0.4), 0 1px 0 rgba(255,255,255,0.1) inset !important;
+    transition: all 0.2s ease !important;
+    width: 100% !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -637,20 +654,25 @@ def load_engines():
 
 engine2, engine4, engine5, engine6, engine7 = load_engines()
 
-# --- AUTO-LOAD KAMUS ---
+# --- AUTO-LOAD KAMUS + ITALIC ---
 @st.cache_resource(show_spinner=False)
 def _load_kamus_from_sheet():
     d = CustomDictionary()
-    count = d.load_defaults()
-    return d, count
+    count_kamus = d.load_defaults()
+    i = ItalicDictionary()
+    count_italic = i.load_defaults()
+    return d, count_kamus, i, count_italic
 
 if 'custom_dict' not in st.session_state:
-    _d, _n = _load_kamus_from_sheet()
+    _d, _n, _i, _ni = _load_kamus_from_sheet()
     st.session_state['custom_dict'] = _d
     st.session_state['kamus_count'] = _n
+    st.session_state['italic_dict'] = _i
+    st.session_state['italic_count'] = _ni
 
 _kamus = st.session_state.get('custom_dict')
 _count = len(_kamus) if _kamus else 0
+_italic_count = st.session_state.get('italic_count', 0)
 
 # --- HALAMAN UTAMA ---
 
@@ -712,7 +734,46 @@ with col_set2:
         key="lang_main"
     )
 
-btn_process = st.button("🚀 Proses", key="btn_main", use_container_width=True)
+# --- TOMBOL PROSES + LOAD KAMUS BERDAMPINGAN ---
+_col_proses, _col_sync = st.columns(2)
+with _col_proses:
+    btn_process = st.button("🚀 Proses", key="btn_main", use_container_width=True)
+with _col_sync:
+    _btn_sync = st.button("🔄 Load Kamus", key="sync_kamus", use_container_width=True)
+
+# --- NOTIFIKASI SETELAH SINKRONISASI ---
+if _btn_sync:
+    with st.spinner("Memuat kamus dari Google Spreadsheet..."):
+        _load_kamus_from_sheet.clear()
+        for _k in ['custom_dict', 'kamus_count', 'italic_dict', 'italic_count']:
+            if _k in st.session_state:
+                del st.session_state[_k]
+        _d_new, _n_new, _i_new, _ni_new = _load_kamus_from_sheet()
+        st.session_state['custom_dict']  = _d_new
+        st.session_state['kamus_count']  = _n_new
+        st.session_state['italic_dict']  = _i_new
+        st.session_state['italic_count'] = _ni_new
+    _notif_kamus  = f"📖 **{_n_new} istilah terjemahan** aktif (Spreadsheet 1)" if _n_new > 0 else "⚠️ Kamus terjemahan kosong atau gagal dimuat"
+    _notif_italic = f"✍️ **{_ni_new} kata tidak diterjemahkan / italic** aktif (Spreadsheet 2)" if _ni_new > 0 else "⚠️ Daftar kata italic kosong atau gagal dimuat"
+    _notif_status = "✅ Sinkronisasi berhasil!" if (_n_new > 0 or _ni_new > 0) else "❌ Sinkronisasi gagal"
+    st.session_state['_kamus_notif'] = (
+        f"{_notif_status}  \n"
+        f"{_notif_kamus}  \n"
+        f"{_notif_italic}"
+    )
+    st.session_state['_kamus_notif_type'] = "success" if (_n_new > 0 or _ni_new > 0) else "error"
+    st.rerun()
+
+# --- TAMPILKAN NOTIFIKASI KAMUS (persisten setelah rerun) ---
+if st.session_state.get('_kamus_notif'):
+    if st.session_state.get('_kamus_notif_type') == "success":
+        st.success(st.session_state['_kamus_notif'])
+    else:
+        st.error(st.session_state['_kamus_notif'])
+    if st.button("✕ Tutup", key="close_kamus_notif"):
+        del st.session_state['_kamus_notif']
+        del st.session_state['_kamus_notif_type']
+        st.rerun()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1366,27 +1427,26 @@ with st.expander(_exp_label, expanded=True):
                 _clean = re.sub(r'\s+', ' ', _clean).strip()
                 _components.html(_tts_html(_clean, f"hist_{idx}"), height=44)
 
-    # ── Voice Input — fixed position, kompatibel Streamlit Cloud ────────────
+    # ── Voice Input ─────────────────────────────────────────────────────────
+    # Strategi: inject tombol ke parent DOM (dalam chat input bar).
+    # Fallback: tombol fixed di iframe jika parent DOM tidak bisa diakses.
     _components.html("""
 <style>
+/* ── Fallback button (tampil hanya jika inject parent gagal) ── */
 #mic-fixed-btn {
+  display: none;                       /* tersembunyi by default */
   position: fixed;
-  bottom: 18px;
-  right: calc(50% - 360px);   /* sejajar kanan chat area max-width 780px */
+  bottom: 14px;
+  right: calc(50% - 375px);
   z-index: 99999;
   background: linear-gradient(135deg, #6366f1, #4f46e5);
   border: none; color: #fff;
   font-size: 0.78rem; font-weight: 700;
-  padding: 9px 16px; border-radius: 99px; cursor: pointer;
+  padding: 8px 15px; border-radius: 99px; cursor: pointer;
   font-family: 'Outfit', sans-serif;
   box-shadow: 0 4px 16px rgba(99,102,241,0.5);
   transition: all 0.2s; white-space: nowrap;
-  display: flex; align-items: center; gap: 5px;
-}
-#mic-fixed-btn:hover {
-  background: linear-gradient(135deg,#818cf8,#6366f1);
-  box-shadow: 0 6px 22px rgba(99,102,241,0.65);
-  transform: translateY(-1px);
+  align-items: center; gap: 5px;
 }
 #mic-fixed-btn.listening {
   background: linear-gradient(135deg,#ef4444,#dc2626) !important;
@@ -1397,9 +1457,9 @@ with st.expander(_exp_label, expanded=True):
   70%  { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
   100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
 }
-#mic-toast {
+#mic-toast-local {
   display: none;
-  position: fixed; bottom: 65px; left: 50%;
+  position: fixed; bottom: 60px; left: 50%;
   transform: translateX(-50%);
   background: rgba(15,23,42,0.96);
   border: 1px solid rgba(99,102,241,0.4);
@@ -1408,124 +1468,88 @@ with st.expander(_exp_label, expanded=True):
   font-family: sans-serif; z-index: 99999;
   box-shadow: 0 4px 20px rgba(0,0,0,0.4);
   white-space: nowrap; pointer-events: none;
-  max-width: 90vw; overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* Responsif: geser tombol ke kiri saat layar kecil */
-@media (max-width: 860px) {
-  #mic-fixed-btn { right: 12px; }
+  max-width: 90vw; overflow: hidden; text-overflow: ellipsis;
 }
 </style>
 
 <button id="mic-fixed-btn" onclick="toggleMic()">🎤 Bicara</button>
-<div id="mic-toast"></div>
+<div   id="mic-toast-local"></div>
 
 <script>
 (function(){
-  // ── State tersimpan di window agar bertahan antar re-render iframe ────────
   if (!window._mic) window._mic = { rec: null, listening: false, timer: null };
   var M = window._mic;
 
-  var btn   = document.getElementById('mic-fixed-btn');
-  var toast = document.getElementById('mic-toast');
+  /* ── Referensi tombol & toast aktif (bisa fallback atau parent) ── */
+  var fbBtn   = document.getElementById('mic-fixed-btn');
+  var fbToast = document.getElementById('mic-toast-local');
+  var activeBtn   = fbBtn;
+  var activeToast = fbToast;
 
+  /* ── Toast ── */
   function showToast(msg, ms) {
-    toast.textContent = msg;
-    toast.style.display = 'block';
+    activeToast.textContent = msg;
+    activeToast.style.display = 'block';
     clearTimeout(M.timer);
-    if (ms) M.timer = setTimeout(function(){ toast.style.display='none'; }, ms);
+    if (ms) M.timer = setTimeout(function(){ activeToast.style.display='none'; }, ms);
   }
 
+  /* ── State tombol ── */
   function resetBtn() {
-    btn.innerHTML = '🎤 Bicara';
-    btn.classList.remove('listening');
+    activeBtn.innerHTML = '🎤 Bicara';
+    activeBtn.classList.remove('listening');
   }
-
   function forceStop() {
     if (M.rec) { try { M.rec.abort(); } catch(e){} M.rec = null; }
-    M.listening = false;
-    resetBtn();
+    M.listening = false; resetBtn();
   }
 
+  /* ── Kirim teks ke textarea Streamlit ── */
   function sendToChat(txt) {
-    /* Coba inject ke parent Streamlit — works lokal.
-       Di Cloud, fallback ke clipboard + notif manual. */
     var sent = false;
-
-    // Coba window, window.parent, window.top secara berturut
     var targets = [];
     try { targets.push(window); } catch(e){}
     try { if (window.parent !== window) targets.push(window.parent); } catch(e){}
     try { if (window.top !== window && window.top !== window.parent) targets.push(window.top); } catch(e){}
-
     for (var i = 0; i < targets.length && !sent; i++) {
       try {
         var w = targets[i];
         var ta = w.document.querySelector('div[data-testid="stChatInput"] textarea');
         if (!ta) continue;
-
         var setter = Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype, 'value').set;
         setter.call(ta, txt);
         ta.dispatchEvent(new Event('input',  {bubbles:true}));
         ta.dispatchEvent(new Event('change', {bubbles:true}));
-
         setTimeout(function(){
-          ['keydown','keypress','keyup'].forEach(function(evName){
-            ta.dispatchEvent(new w.KeyboardEvent(evName, {
-              key:'Enter', code:'Enter', keyCode:13, which:13,
-              bubbles:true, cancelable:true
-            }));
+          ['keydown','keypress','keyup'].forEach(function(ev){
+            ta.dispatchEvent(new w.KeyboardEvent(ev, {key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
           });
-          toast.style.display = 'none';
+          activeToast.style.display = 'none';
         }, 150);
-
         sent = true;
       } catch(e) {}
     }
-
     if (!sent) {
-      // Fallback: copy ke clipboard, minta user paste manual
-      try {
-        navigator.clipboard.writeText(txt).then(function(){
-          showToast('📋 Tersalin — paste (Ctrl+V) ke kotak chat', 4000);
-        });
-      } catch(e) {
-        showToast('💬 ' + txt.substring(0,60) + (txt.length>60?'...':''), 5000);
-      }
+      try { navigator.clipboard.writeText(txt).then(function(){ showToast('📋 Tersalin — paste Ctrl+V ke chat', 4000); }); }
+      catch(e) { showToast('💬 ' + txt.substring(0,60), 5000); }
     }
   }
 
+  /* ── Logika mic utama ── */
   window.toggleMic = function() {
-    if (M.listening) {
-      forceStop();
-      showToast('⏹ Dihentikan', 1500);
-      return;
-    }
-
+    if (M.listening) { forceStop(); showToast('⏹ Dihentikan', 1500); return; }
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      showToast('❌ Gunakan Chrome/Edge untuk voice input', 3000);
-      return;
-    }
-
+    if (!SR) { showToast('❌ Gunakan Chrome/Edge untuk voice input', 3000); return; }
     forceStop();
-
     var rec = new SR();
-    rec.lang = 'id-ID';
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.maxAlternatives = 1;
+    rec.lang = 'id-ID'; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
     M.rec = rec;
-
     var lastTxt = '';
-
     rec.onstart = function() {
       M.listening = true;
-      btn.innerHTML = '🔴 Stop';
-      btn.classList.add('listening');
+      activeBtn.innerHTML = '🔴 Stop'; activeBtn.classList.add('listening');
       showToast('🎤 Sedang mendengarkan...');
     };
-
     rec.onresult = function(e) {
       var interim='', final_t='';
       for (var i=e.resultIndex; i<e.results.length; i++) {
@@ -1535,29 +1559,105 @@ with st.expander(_exp_label, expanded=True):
       lastTxt = final_t || interim;
       showToast('💬 ' + lastTxt);
     };
-
     rec.onend = function() {
-      M.rec = null; M.listening = false;
-      resetBtn();
+      M.rec = null; M.listening = false; resetBtn();
       var txt = lastTxt.trim(); lastTxt = '';
       if (!txt) { showToast('⚠️ Tidak terdeteksi — coba lagi', 2500); return; }
       sendToChat(txt);
     };
-
     rec.onerror = function(e) {
       M.rec = null; M.listening = false; resetBtn();
       if (e.error === 'aborted') return;
-      var msgs = {
-        'no-speech'    : '⚠️ Tidak ada suara — coba lagi',
-        'not-allowed'  : '❌ Izin mikrofon ditolak di browser',
-        'audio-capture': '❌ Mikrofon tidak ditemukan',
-        'network'      : '❌ Gangguan jaringan'
-      };
+      var msgs = {'no-speech':'⚠️ Tidak ada suara','not-allowed':'❌ Izin mikrofon ditolak','audio-capture':'❌ Mikrofon tidak ada','network':'❌ Gangguan jaringan'};
       showToast(msgs[e.error] || ('❌ Error: ' + e.error), 3000);
     };
-
     rec.start();
   };
+
+  /* ── Inject tombol ke parent DOM (dalam bar chat input Streamlit) ── */
+  function setupParentBtn() {
+    try {
+      var pw = window.parent;
+      if (pw === window) throw new Error('no parent');
+
+      /* -- CSS ke parent sekali saja -- */
+      if (!pw.document.getElementById('_mic_style')) {
+        var s = pw.document.createElement('style');
+        s.id = '_mic_style';
+        s.textContent =
+          'div[data-testid="stChatInput"]{position:relative !important;}' +
+          'div[data-testid="stChatInput"] textarea{padding-right:128px !important;}' +
+          '#_mic_btn{' +
+            'position:absolute;right:52px;top:50%;transform:translateY(-50%);' +
+            'background:linear-gradient(135deg,#6366f1,#4f46e5);' +
+            'border:none;color:#fff;font-size:0.78rem;font-weight:700;' +
+            'padding:7px 14px;border-radius:99px;cursor:pointer;' +
+            'font-family:Outfit,sans-serif;' +
+            'box-shadow:0 3px 12px rgba(99,102,241,0.5);' +
+            'transition:all 0.2s;white-space:nowrap;' +
+            'display:inline-flex;align-items:center;gap:5px;z-index:200;' +
+          '}' +
+          '#_mic_btn:hover{background:linear-gradient(135deg,#818cf8,#6366f1);box-shadow:0 5px 18px rgba(99,102,241,0.65);}' +
+          '#_mic_btn.listening{background:linear-gradient(135deg,#ef4444,#dc2626)!important;animation:_mpulse 1s infinite;}' +
+          '@keyframes _mpulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,0.6)}70%{box-shadow:0 0 0 8px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}' +
+          '#_mic_toast{display:none;position:fixed;bottom:72px;left:50%;transform:translateX(-50%);' +
+            'background:rgba(15,23,42,0.96);border:1px solid rgba(99,102,241,0.4);' +
+            'border-radius:12px;padding:7px 16px;font-size:0.78rem;color:#c7d2fe;' +
+            'font-family:sans-serif;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.4);' +
+            'white-space:nowrap;pointer-events:none;max-width:90vw;overflow:hidden;text-overflow:ellipsis;}';
+        pw.document.head.appendChild(s);
+      }
+
+      /* -- Toast ke body -- */
+      if (!pw.document.getElementById('_mic_toast')) {
+        var t = pw.document.createElement('div');
+        t.id = '_mic_toast';
+        pw.document.body.appendChild(t);
+      }
+      activeToast = pw.document.getElementById('_mic_toast');
+
+      /* -- Fungsi inject/re-inject tombol -- */
+      function doInject() {
+        var chatInput = pw.document.querySelector('div[data-testid="stChatInput"]');
+        if (!chatInput) return false;
+        var existing = pw.document.getElementById('_mic_btn');
+        if (existing && chatInput.contains(existing)) {
+          /* tombol sudah ada dan masih di tempat yang benar */
+          activeBtn = existing;
+          existing.onclick = function(e){ e.preventDefault(); window.toggleMic(); };
+          fbBtn.style.display = 'none';
+          return true;
+        }
+        if (existing) existing.remove();   /* ada tapi di luar chatInput, hapus */
+        var btn = pw.document.createElement('button');
+        btn.id   = '_mic_btn';
+        btn.type = 'button';
+        btn.innerHTML = '🎤 Bicara';
+        btn.onclick = function(e){ e.preventDefault(); window.toggleMic(); };
+        chatInput.appendChild(btn);
+        activeBtn   = btn;
+        fbBtn.style.display = 'none';
+        return true;
+      }
+
+      /* Coba inject sekarang */
+      if (!doInject()) {
+        /* Chat input belum ada — pakai MutationObserver di parent */
+        var obs = new pw.MutationObserver(function(){ doInject(); });
+        obs.observe(pw.document.body, { childList:true, subtree:true });
+      } else {
+        /* Sudah inject, pasang observer untuk bertahan saat Streamlit rerender */
+        var obs2 = new pw.MutationObserver(function(){ doInject(); });
+        obs2.observe(pw.document.body, { childList:true, subtree:true });
+      }
+
+    } catch(e) {
+      /* Akses parent gagal — tampilkan fallback button di iframe */
+      fbBtn.style.display = 'flex';
+    }
+  }
+
+  setupParentBtn();
 })();
 </script>
 """, height=56)
