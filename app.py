@@ -1676,7 +1676,7 @@ st.markdown(
     f"<br><span style='font-size:0.72rem;opacity:0.8;'>"
     f"<a href='https://bit.ly/kamusSNI' target='_blank' style='color:#ffffff;text-decoration:none;'>📖 Kamus SNI</a>"
     f"&nbsp;&nbsp;·&nbsp;&nbsp;"
-    f"<a href='https://bit.ly/kamusistilahasing2' target='_blank' style='color:#ffffff;text-decoration:none;'>🌐 Kamus Istilah Asing</a>"
+    f"<a href='https://docs.google.com/spreadsheets/d/1NZm1HjsjxmflxnZlzV_O2XF75ZlMUOu8VVofsKfp_FA/edit?usp=sharing target='_blank' style='color:#ffffff;text-decoration:none;'>🌐 Kamus Istilah Asing</a>"
     f"</span>"
     f"</div>",
     unsafe_allow_html=True
